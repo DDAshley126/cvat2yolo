@@ -1,0 +1,26 @@
+{
+    "class_name": {
+        "0": {
+            "id": 0,
+            "name": "classname1",
+            "keypoint_amount": 1,
+            "keypoint_ref": "keypoint1"
+        },
+        "1": {
+            "id": 1,
+            "name": "class_name2",
+            "keypoint_amount": 1,
+            "keypoint_ref": "keypoint2"
+        }
+    },
+    "kpt_name": {
+        "2": {
+            "id": 2,
+            "name": "keypoint1"
+        },
+        "3": {
+            "id": 3,
+            "name": "keypoint2"
+        }
+    }
+}
