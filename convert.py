@@ -1,89 +1,74 @@
-import os
 import shutil
 from pathlib import Path
 import random
 import argparse
+from typing import Tuple
 
 
-def split_yolo_dataset(src_dir, ratios=(0.6, 0.2, 0.2)):
+def split_yolo_dataset(src_dir: str, ratios: Tuple = (0.6, 0.2, 0.2)):
     """
     划分训练集验证集测试集
 
     Args：
-        src_dir: 原始数据集目录(需要包含images和labels)
-        ratios: 训练集:验证集:测试集比例，默认6：2：2
+        src_dir: 原始数据集目录（需要包含images和labels子目录）
+        ratios: 训练/验证/测试集比例
     """
-    dst_dir = f"{src_dir}_split"
-    if os.path.exists(dst_dir):
-        shutil.rmtree(dst_dir)
+    dst_path = Path(f'{src_dir}_split')
+    if dst_path.exists():
+        shutil.rmtree(dst_path)
 
-    # 创建标准目录结构
-    base_path = Path(dst_dir)
-    (base_path / "images").mkdir(parents=True)
-    (base_path / "labels").mkdir(parents=True)
+    for i, r in enumerate(ratios):
+        if not isinstance(r, (int, float)):
+            raise TypeError(f'Parameter requires float or int, but got {type(r)}')
+    if sum(ratios) != 1:
+        raise ValueError(f'Sum of ratios must be equal to 1')
+    if len(ratios) != 3:
+        raise ValueError(f'Ratios must contain 3 elements')
 
-    # 复制原始文件
-    shutil.copytree(Path(src_dir) / "images", base_path / "images" / "original")
-    shutil.copytree(Path(src_dir) / "labels", base_path / "labels" / "original")
-    shutil.copy(Path(src_dir) / "classes.txt", base_path)
-    if (Path(src_dir) / "notes.json").exists():
-        shutil.copy(Path(src_dir) / "notes.json", base_path)
+    (dst_path / 'images').mkdir(parents=True, exist_ok=True)
+    (dst_path / 'labels').mkdir(parents=True, exist_ok=True)
 
-    # 获取所有图像文件名（不带扩展名）
-    all_images = [f.stem for f in (base_path / "images/original").glob("*.*")
-                  if f.suffix.lower() in ['.jpg', '.png', '.jpeg']]
-    random.shuffle(all_images)  # 随机打乱顺序
+    image_list = (Path(src_dir) / 'images').iterdir()
+    image_list = [image for image in image_list if image.suffix in ['.png', '.jpg', 'jpeg']]
+    num = len(image_list)
+    train_num = int(ratios[0] * num)
+    val_num = int(ratios[1] * num)
 
-    # 计算分割点
-    total = len(all_images)
-    train_end = int(ratios[0] * total)
-    val_end = train_end + int(ratios[1] * total)
-
-    # 划分数据集
-    splits = {
-        "train": all_images[:train_end],
-        "val": all_images[train_end:val_end],
-        "test": all_images[val_end:]
+    random.shuffle(image_list)
+    dataset_split = {
+        'train': image_list[:train_num],
+        'val': image_list[train_num:train_num + val_num],
+        'test': image_list[train_num + val_num:]
     }
 
-    # 创建目标目录结构
-    for split in splits:
-        (base_path / "images" / split).mkdir()
-        (base_path / "labels" / split).mkdir()
+    for split in dataset_split:
+        (dst_path / "images" / split).mkdir()
+        (dst_path / "labels" / split).mkdir()
 
-    # 移动文件到对应目录
-    for split, files in splits.items():
-        for fname in files:
-            # 处理图像文件
-            src_img = next((base_path / "images/original").glob(f"{fname}.*"))
-            dst_img = base_path / "images" / split / src_img.name
-            shutil.move(str(src_img), str(dst_img))
+    for split, images in dataset_split.items():
+        for image in images:
+            shutil.copy(image, Path(dst_path) / 'images' / split)
 
-            # 处理标注文件
-            src_label = base_path / "labels/original" / f"{fname}.txt"
-            dst_label = base_path / "labels" / split / src_label.name
-            if src_label.exists():
-                shutil.move(str(src_label), str(dst_label))
-            else:
-                print(f"警告：缺失标注文件 {src_label}")
+            label_txt = image.name.split('.')[0]
+            shutil.copyfile(Path(src_dir) / 'labels' / f'{label_txt}.txt',
+                            Path(dst_path) / 'labels' / split / f'{label_txt}.txt')
 
-    # 清理原始目录
-    shutil.rmtree(base_path / "images/original")
-    shutil.rmtree(base_path / "labels/original")
-
-    print(f"数据集已分割到 {dst_dir}")
-    print(f"最终目录结构：")
-    print(f"images/")
-    print(f"├── train/ : {len(splits['train'])} 图像")
-    print(f"├── val/   : {len(splits['val'])} 图像")
-    print(f"└── test/  : {len(splits['test'])} 图像")
-    print(f"labels/")
-    print(f"├── train/ : {len(splits['train'])} 标注")
-    print(f"├── val/   : {len(splits['val'])} 标注")
-    print(f"└── test/  : {len(splits['test'])} 标注")
+    print(f'转换完成，数据集已保存至{dst_path}')
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="将CVAT标注转换为YOLO格式")
-    parser.add_argument("--cvat_dir", type=str, required=True, help="CVAT标注数据集目录，包含images和annotations子目录")
+    parser = argparse.ArgumentParser(description="")
+    subparser = parser.add_subparsers(title='subfunc')
+
+    parser_split = subparser.add_parser('split_yolo_dataset', help='将CVAT标注转换为YOLO格式')
+    parser_split.add_argument("--src_dir", type=str, required=True, help="CVAT标注数据集目录，包含images和annotations子目录")
+    parser_split.add_argument('--ratios', type=float, nargs=3, default=(0.6, 0.2, 0.2))
+    parser_split.set_defaults(func=split_yolo_dataset)
+
     args = parser.parse_args()
+    
+    if hasattr(args, 'func'):
+        func_args = {k: v for k, v in vars(args).items() if k != 'func'}
+        args.func(**func_args)
+    else:
+        parser.print_help()

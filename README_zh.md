@@ -4,14 +4,14 @@
 
 ## 功能特点
 
-- 解析CVAT到处的`annotation.xml`文件
+- 解析CVAT导出的`annotation.xml`文件
 - 自动生成yolo格式的标签文件（每张图片对应一个txt）
 - 支持多类别映射
 - 生成`data.yml`配置文件，可直接用于YOLOv8以及上版本的模型训练
 
 ## 安装方式
-```
-git clone 
+```bash
+git clone https://github.com/DDAshley126/cvat2yolo.git
 cd cvat2yolo
 pip install requirements.txt
 ```
