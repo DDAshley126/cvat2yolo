@@ -11,7 +11,7 @@
 
 ## 安装方式
 ```bash
-git clone https://github.com/DDAshley126/cvat2yolo.git
+git clone https://gitee.com/DDAshley126/cvat2yolo.git
 cd cvat2yolo
 pip install requirements.txt
 ```
