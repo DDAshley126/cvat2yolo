@@ -1,17 +1,24 @@
 import shutil
 from pathlib import Path
 import random
-import argparse
+import os
 from typing import Tuple, Literal
+import yaml
+import xml.etree.ElementTree as ET
+from tqdm import tqdm
+import cv2
+from xml.dom import minidom
+from ultralytics import YOLO
+import json
 
 
 def split_yolo_dataset(src_dir: str, ratios: Tuple = (0.6, 0.2, 0.2)):
     """
-    划分训练集验证集测试集
+    Split dataset
 
     Args：
-        src_dir: 原始数据集目录（需要包含images和labels子目录）
-        ratios: 训练/验证/测试集比例
+        src_dir: Initial dataset directory, images and labels must bo included
+        ratios: Train/Validation/Test ratio
     """
     dst_path = Path(f'{src_dir}_split')
     if dst_path.exists():
@@ -100,7 +107,7 @@ def cvat_detect_to_yolo_detect(cvat_dir, output_dir, cvat_save_images=True, imag
     print('Transform successfully!')
 
 
-def cvat_xml_to_yolo_pose(cvat_dir, output_dir, cvat_save_images=True, image_dir=None, key_point_fromat=: Literal['2D', '3D'] = 's2D'):
+def cvat_xml_to_yolo_pose(cvat_dir, class_names: dict, output_dir, cvat_save_images=True, image_dir=None, key_point_fromat: Literal['2D', '3D'] = '2D'):
     """
     Convert CVAT annotations.xml file to YOLO pose format
 
@@ -134,7 +141,6 @@ def cvat_xml_to_yolo_pose(cvat_dir, output_dir, cvat_save_images=True, image_dir
             ytl = float(box.get('ytl'))
             xbr = float(box.get('xbr'))
             ybr = float(box.get('ybr'))
-            z_order = int(box.get('z_order'))
 
             # Coordinate normalization calculation
             box_width = xbr - xtl
@@ -227,7 +233,7 @@ def yolo_to_cvat(image_dir, label_dir, output_dir, class_names):
         label_path = os.path.join(label_dir, label_file)
 
         # Generate image element
-        image_elem = ET.SubElement(ann, 'image')
+        image_elem = ET.SubElement(root, 'image')
         image_elem.set('id', str(image_id))
         image_elem.set('name', f'images/{img_file}')
         image_elem.set('width', str(width))
@@ -260,9 +266,113 @@ def yolo_to_cvat(image_dir, label_dir, output_dir, class_names):
                     box_elem.set('ybr', str(abs_y + abs_h))
         image_id += 1
 
-    xml_str = minidom.parseString(ET.tostring(ann)).toprettyxml(indent='  ')
+    xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent='  ')
     xml_output_path = os.path.join(output_dir, 'annotations.xml')
     with open(xml_output_path, 'w', encoding='utf-8') as f:
         f.write(xml_str)
+
+    print(f"Transform successfully.")
+
+
+def yolo_txt_to_cvat_xml(image_dir: str, txt_dir: str, output_dir: str, class_names: dict):
+    """
+    Predict images and save the prediction result files, then convert YOLO format files to CVAT files,
+    making it easier to upload to CVAT for further annotation and simplifying the annotation work.
+    There is no need to build a CVAT model prediction service (cause I always fail to set the service).
+
+    Args:
+        image_dir: Directory of images, locally
+        txt_dir: Directory for storing YOLO prediction .txt files
+        output_dir: Directory for exporting CVAT format files
+        class_names: Class mapping dict, for example {0: 'person', 1: 'car', 2: 'road'}
+
+    Example:
+        Step 1: Save prediction results
+        ```
+            model = YOLO('your model path')
+            result = model.predict(source='images directory', save_txt=True)
+        ```
+        Step 2: Run it
+        ```
+            yolo_txt_to_cvat_xml(image_dir, txt_dir, output_dir, class_names)
+        ```
+
+        Step 3: Upload to CVAT
+        In CVAT, choose 'Import annotations' to upload annotations.xml. Remember, choose 'CVAT 1.1' in 'Import format'.
+    """
+    image_extensions = ('jpg', 'png', 'jpeg')
+    image_paths = []
+    for ext in image_extensions:
+        image_paths.extend(Path(image_dir).glob(f'*{ext}'))
+        image_paths.extend(Path(image_dir).glob(f'*{ext.upper()}'))
+
+    if not image_paths:
+        raise ValueError(f'Error: {image_dir} cannot found image files.')
+
+    # Create root element
+    root = ET.Element('annotations')
+
+    for img_path in sorted(image_paths):
+        img_name = img_path.name
+        stem = img_path.stem
+
+        # Get image size
+        img = cv2.imread(str(img_path))
+        if img is None:
+            print(f'Warning: cannot read {img_path}, pass')
+            continue
+        width = img.shape[1]
+        height = img.shape[0]
+
+        # Find YOLO txt file
+        txt_path = Path(txt_dir) / f'{stem}.txt'
+        if not txt_path.exists():
+            print(f'Warning: cannot found {txt_path}, pass')
+
+        # Create image element
+        image_elem = ET.SubElement(root, 'images')
+        image_elem.set('name', img_name)
+        image_elem.set('width', str(width))
+        image_elem.set('height', str(height))
+
+        with open(txt_path, 'r') as f:
+            lines = f.readlines()
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) != 5:
+                print(f'Warning: {txt_path} error.')
+                continue
+            id = int(parts[0])
+            xc = float(parts[1])
+            yc = float(parts[2])
+            bw = float(parts[3])
+            bh = float(parts[4])
+
+            # Convert to absolute coordinates (xtl, ytl, xbr, ybr)
+            xtl = (xc - bw / 2) * width
+            ytl = (yc - bh / 2) * height
+            xbr = (xc + bw / 2) * width
+            ybr = (yc + bh / 2) * height
+
+            label = class_names.get(id, str(id))
+
+            # Add box element
+            box_elem = ET.SubElement(image_elem, "box")
+            box_elem.set("label", label)
+            box_elem.set("xtl", f"{xtl:.2f}")
+            box_elem.set("ytl", f"{ytl:.2f}")
+            box_elem.set("xbr", f"{xbr:.2f}")
+            box_elem.set("ybr", f"{ybr:.2f}")
+            box_elem.set("occluded", "0")
+            box_elem.set("source", "auto")
+
+    output_path = Path(output_dir) / 'annotations.xml'
+    rough = ET.tostring(root, encoding='utf-8')
+    parsed = minidom.parseString(rough)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(parsed.toprettyxml(indent='  '))
 
     print(f"Transform successfully.")
