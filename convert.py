@@ -60,7 +60,11 @@ def split_yolo_dataset(src_dir: str, ratios: Tuple = (0.6, 0.2, 0.2)):
             shutil.copyfile(Path(src_dir) / 'labels' / f'{label_txt}.txt',
                             Path(dst_path) / 'labels' / split / f'{label_txt}.txt')
 
-    print(f'转换完成，数据集已保存至{dst_path}')
+    # move classes.txt and note.json
+    shutil.copy(Path(src_dir) / 'classes.txt', Path(dst_dir)/ 'classes.txt')
+    shutil.copy(Path(src_dir) / 'notes.json', Path(dst_dir) / 'notes.json')
+
+    print(f'Transform successfully, dataset saved in {dst_path}')
 
 
 def cvat_detect_to_yolo_detect(cvat_dir, output_dir, cvat_save_images=True, image_dir=None):
